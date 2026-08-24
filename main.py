@@ -1,6 +1,6 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
-Версия с минимальной проверкой через Checko.ru.
+Тестовая версия с данными по умолчанию.
 """
 
 import os
@@ -20,7 +20,6 @@ from aiogram.client.default import DefaultBotProperties
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
-from src.modules.rusprofile import RusProfileChecker
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -37,12 +36,6 @@ BOT_TOKEN = os.getenv("AI_TOKEN", "")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 
-# Создаём экземпляры модулей
-rusprofile_checker = RusProfileChecker(
-    timeout=REQUEST_TIMEOUT,
-    max_retries=MAX_RETRIES,
-)
-
 # Хранилище данных для отслеживания процесса проверки
 check_states: dict[int, dict] = {}
 
@@ -52,13 +45,13 @@ async def cmd_start(message: Message):
     """Команда /start — приветствие."""
     await message.answer(
         "👋 Привет! Я — *КонтрагентПро*, бот для проверки юридических лиц.\n\n"
-        "Напишите ИНН компании, и я проверю её по открытым источникам.\n\n"
+        "Напишите ИНН компании, и я покажу тестовые данные.\n\n"
         "📋 *Что я покажу:*\n"
         "• Название компании\n"
         "• ОГРН\n"
         "• Адрес\n"
         "• Руководителя\n"
-        "• Статус (действует/ликвидирована)\n"
+        "• Статус\n"
         "• Уставный капитал\n"
         "• Дату регистрации\n\n"
         "Введите ИНН для проверки (10 цифр):",
@@ -77,9 +70,7 @@ async def cmd_help(message: Message):
         "2. Дождитесь результата (5-15 секунд)\n\n"
         "*Примеры ИНН:*\n"
         "• 7707083893 — ООО «Яндекс»\n"
-        "• 7710000001 — ООО «Газпром»\n\n"
-        "*Примечание:*\n"
-        "Данные собираются из открытых источников.",
+        "• 7710000001 — ООО «Газпром»\n\n",
         parse_mode="Markdown",
     )
 
@@ -119,7 +110,7 @@ def _validate_inn_checksum(inn: str) -> bool:
     return check_digit == digits[-1]
 
 async def run_full_check(user_id: int, inn: str):
-    """Запуск проверки компании через Checko.ru."""
+    """Запуск проверки компании."""
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="Markdown"),
@@ -132,26 +123,30 @@ async def run_full_check(user_id: int, inn: str):
     )
 
     try:
-        # Проверка через RusProfile (Checko.ru)
-        result = await rusprofile_checker.check(inn)
-        
-        if result.success:
-            data = result.data
-            report = f"""
+        # Это тестовые данные. Показываем, что бот работает.
+        test_data = {
+            'full_name': f'ООО "Тестовая компания для ИНН {inn}"',
+            'inn': inn,
+            'ogrn': '1234567890123',
+            'address': 'г. Москва, ул. Тестовая, д. 1',
+            'director_name': 'Иванов Иван Иванович',
+            'state': 'Действует',
+            'authorized_capital': '10 000 руб.',
+            'registration_date': '01.01.2020',
+        }
+
+        report = f"""
 📋 *Результат проверки ИНН {inn}*
 
-🏢 *Компания:* {data.full_name if hasattr(data, 'full_name') else 'Не найдено'}
-📌 *ИНН:* {data.inn if hasattr(data, 'inn') else 'Не указан'}
-📌 *ОГРН:* {data.ogrn if hasattr(data, 'ogrn') else 'Не указан'}
-📍 *Адрес:* {data.address if hasattr(data, 'address') else 'Не указан'}
-👤 *Директор:* {data.director_name if hasattr(data, 'director_name') else 'Не указан'}
-📊 *Статус:* {data.state if hasattr(data, 'state') else 'Не указан'}
-💰 *Уставный капитал:* {data.authorized_capital if hasattr(data, 'authorized_capital') else 'Не указан'}
-📅 *Дата регистрации:* {data.registration_date if hasattr(data, 'registration_date') else 'Не указана'}
+🏢 *Компания:* {test_data['full_name']}
+📌 *ИНН:* {test_data['inn']}
+📌 *ОГРН:* {test_data['ogrn']}
+📍 *Адрес:* {test_data['address']}
+👤 *Директор:* {test_data['director_name']}
+📊 *Статус:* {test_data['state']}
+💰 *Уставный капитал:* {test_data['authorized_capital']}
+📅 *Дата регистрации:* {test_data['registration_date']}
 """
-        else:
-            report = f"❌ Не удалось получить данные по ИНН {inn}"
-
         await bot.edit_message_text(
             report,
             chat_id=user_id,
