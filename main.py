@@ -1,6 +1,6 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
-Парсинг данных с Checko.ru.
+Парсинг данных с rusprofile.ru.
 """
 
 import os
@@ -32,36 +32,27 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("AI_TOKEN", "")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
-# Хранилище данных для отслеживания процесса проверки
+# Хранилище данных
 check_states: dict[int, dict] = {}
 
-# ==================== ПАРСЕР CHECKO.RU ====================
+# ==================== ПАРСЕР RUSPROFILE.RU ====================
 
 async def get_company_data(inn: str) -> dict:
-    """Получение данных о компании с Checko.ru."""
+    """Получение данных о компании с rusprofile.ru."""
     try:
-        url = f"https://checko.ru/inn/{inn}"
+        url = f"https://rusprofile.ru/inn/{inn}"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
         }
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as session:
-            # Имитация задержки, как будто человек открывает страницу
-            await asyncio.sleep(2)
-            
+            await asyncio.sleep(1)
             async with session.get(url, headers=headers) as response:
                 if response.status != 200:
-                    logger.error(f"Checko.ru вернул статус {response.status} для ИНН {inn}")
+                    logger.error(f"rusprofile.ru вернул статус {response.status} для ИНН {inn}")
                     return {}
 
                 html = await response.text()
@@ -73,44 +64,40 @@ async def get_company_data(inn: str) -> dict:
                 name_tag = soup.find('h1')
                 if name_tag:
                     data['full_name'] = name_tag.text.strip()
-                else:
-                    name_tag = soup.find('div', class_='company-name')
-                    if name_tag:
-                        data['full_name'] = name_tag.text.strip()
 
-                # Ищем данные в таблице
-                rows = soup.find_all('div', class_='row')
-                for row in rows:
-                    label = row.find('div', class_='col-sm-4')
-                    value = row.find('div', class_='col-sm-8')
-                    if label and value:
-                        label_text = label.text.strip()
-                        value_text = value.text.strip()
-
-                        if 'ИНН' in label_text:
-                            data['inn'] = value_text
-                        elif 'ОГРН' in label_text:
-                            data['ogrn'] = value_text
-                        elif 'Статус' in label_text:
-                            data['state'] = value_text
-                        elif 'Юридический адрес' in label_text:
-                            data['address'] = value_text
-                        elif 'Руководитель' in label_text:
-                            data['director_name'] = value_text
-                        elif 'Уставный капитал' in label_text:
-                            data['authorized_capital'] = value_text
-                        elif 'Дата регистрации' in label_text:
-                            data['registration_date'] = value_text
+                # Ищем таблицу с данными
+                table = soup.find('table', class_='table')
+                if table:
+                    rows = table.find_all('tr')
+                    for row in rows:
+                        cells = row.find_all('td')
+                        if len(cells) >= 2:
+                            key = cells[0].text.strip()
+                            value = cells[1].text.strip()
+                            if 'ИНН' in key:
+                                data['inn'] = value
+                            elif 'ОГРН' in key:
+                                data['ogrn'] = value
+                            elif 'Статус' in key:
+                                data['state'] = value
+                            elif 'Адрес' in key:
+                                data['address'] = value
+                            elif 'Руководитель' in key:
+                                data['director_name'] = value
+                            elif 'Уставный капитал' in key:
+                                data['authorized_capital'] = value
+                            elif 'Дата регистрации' in key:
+                                data['registration_date'] = value
 
                 if data:
-                    logger.info(f"Успешно получены данные с Checko.ru для ИНН {inn}")
+                    logger.info(f"Успешно получены данные с rusprofile.ru для ИНН {inn}")
                     return data
                 else:
-                    logger.warning(f"Данные для ИНН {inn} не найдены на Checko.ru")
+                    logger.warning(f"Данные для ИНН {inn} не найдены на rusprofile.ru")
                     return {}
 
     except Exception as e:
-        logger.error(f"Ошибка при парсинге Checko.ru для ИНН {inn}: {e}")
+        logger.error(f"Ошибка при парсинге rusprofile.ru для ИНН {inn}: {e}")
         return {}
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
@@ -124,7 +111,7 @@ async def cmd_start(message: Message):
         "• ОГРН\n"
         "• Адрес\n"
         "• Руководителя\n"
-        "• Статус (действует/ликвидирована)\n"
+        "• Статус\n"
         "• Уставный капитал\n"
         "• Дату регистрации\n\n"
         "Введите ИНН для проверки (10 цифр):",
@@ -146,7 +133,7 @@ async def cmd_help(message: Message):
         parse_mode="Markdown",
     )
 
-# ==================== ОСНОВНАЯ ЛОГИКА ПРОВЕРКИ ====================
+# ==================== ОСНОВНАЯ ЛОГИКА ====================
 
 def validate_inn(inn: str) -> tuple[bool, str]:
     inn = inn.strip().replace(" ", "").replace("-", "")
@@ -197,7 +184,7 @@ async def run_full_check(user_id: int, inn: str):
 """
         else:
             report = f"""
-❌ *Компания с ИНН {inn} не найдена на Checko.ru*
+❌ *Компания с ИНН {inn} не найдена на rusprofile.ru*
 
 Проверьте правильность ИНН или попробуйте позже.
 """
