@@ -135,19 +135,19 @@ async def run_full_check(user_id: int, inn: str):
         # Проверка через RusProfile (Checko.ru)
         result = await rusprofile_checker.check(inn)
         
-        if result.get("success"):
-            data = result.get("data", {})
+        if result.success:
+            data = result.data
             report = f"""
 📋 *Результат проверки ИНН {inn}*
 
-🏢 *Компания:* {data.get('name', {}).get('full', 'Не найдено')}
-📌 *ИНН:* {data.get('inn', 'Не указан')}
-📌 *ОГРН:* {data.get('ogrn', 'Не указан')}
-📍 *Адрес:* {data.get('address', 'Не указан')}
-👤 *Директор:* {data.get('director', 'Не указан')}
-📊 *Статус:* {data.get('status', 'Не указан')}
-💰 *Уставный капитал:* {data.get('capital', 'Не указан')}
-📅 *Дата регистрации:* {data.get('registration_date', 'Не указана')}
+🏢 *Компания:* {data.full_name if hasattr(data, 'full_name') else 'Не найдено'}
+📌 *ИНН:* {data.inn if hasattr(data, 'inn') else 'Не указан'}
+📌 *ОГРН:* {data.ogrn if hasattr(data, 'ogrn') else 'Не указан'}
+📍 *Адрес:* {data.address if hasattr(data, 'address') else 'Не указан'}
+👤 *Директор:* {data.director_name if hasattr(data, 'director_name') else 'Не указан'}
+📊 *Статус:* {data.state if hasattr(data, 'state') else 'Не указан'}
+💰 *Уставный капитал:* {data.authorized_capital if hasattr(data, 'authorized_capital') else 'Не указан'}
+📅 *Дата регистрации:* {data.registration_date if hasattr(data, 'registration_date') else 'Не указана'}
 """
         else:
             report = f"❌ Не удалось получить данные по ИНН {inn}"
