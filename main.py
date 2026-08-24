@@ -1,6 +1,6 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
-Тестовая версия с данными по умолчанию.
+Версия с парсингом Checko.ru.
 """
 
 import os
@@ -20,6 +20,7 @@ from aiogram.client.default import DefaultBotProperties
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
+from src.modules.rusprofile import RusProfileChecker
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -36,6 +37,12 @@ BOT_TOKEN = os.getenv("AI_TOKEN", "")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 
+# Создаём экземпляр модуля проверки
+rusprofile_checker = RusProfileChecker(
+    timeout=REQUEST_TIMEOUT,
+    max_retries=MAX_RETRIES,
+)
+
 # Хранилище данных для отслеживания процесса проверки
 check_states: dict[int, dict] = {}
 
@@ -45,13 +52,13 @@ async def cmd_start(message: Message):
     """Команда /start — приветствие."""
     await message.answer(
         "👋 Привет! Я — *КонтрагентПро*, бот для проверки юридических лиц.\n\n"
-        "Напишите ИНН компании, и я покажу тестовые данные.\n\n"
+        "Напишите ИНН компании, и я проверю её по открытым источникам.\n\n"
         "📋 *Что я покажу:*\n"
         "• Название компании\n"
         "• ОГРН\n"
         "• Адрес\n"
         "• Руководителя\n"
-        "• Статус\n"
+        "• Статус (действует/ликвидирована)\n"
         "• Уставный капитал\n"
         "• Дату регистрации\n\n"
         "Введите ИНН для проверки (10 цифр):",
@@ -67,7 +74,7 @@ async def cmd_help(message: Message):
         "• /help — Показать справку\n\n"
         "*Как проверить компанию:*\n"
         "1. Напишите ИНН компании (10 цифр)\n"
-        "2. Дождитесь результата (5-15 секунд)\n\n"
+        "2. Дождитесь результата (10-20 секунд)\n\n"
         "*Примеры ИНН:*\n"
         "• 7707083893 — ООО «Яндекс»\n"
         "• 7710000001 — ООО «Газпром»\n\n",
@@ -123,30 +130,29 @@ async def run_full_check(user_id: int, inn: str):
     )
 
     try:
-        # Это тестовые данные. Показываем, что бот работает.
-        test_data = {
-            'full_name': f'ООО "Тестовая компания для ИНН {inn}"',
-            'inn': inn,
-            'ogrn': '1234567890123',
-            'address': 'г. Москва, ул. Тестовая, д. 1',
-            'director_name': 'Иванов Иван Иванович',
-            'state': 'Действует',
-            'authorized_capital': '10 000 руб.',
-            'registration_date': '01.01.2020',
-        }
+        # Получаем данные с Checko.ru
+        data = await rusprofile_checker.check(inn)
 
-        report = f"""
+        if data.full_name:
+            report = f"""
 📋 *Результат проверки ИНН {inn}*
 
-🏢 *Компания:* {test_data['full_name']}
-📌 *ИНН:* {test_data['inn']}
-📌 *ОГРН:* {test_data['ogrn']}
-📍 *Адрес:* {test_data['address']}
-👤 *Директор:* {test_data['director_name']}
-📊 *Статус:* {test_data['state']}
-💰 *Уставный капитал:* {test_data['authorized_capital']}
-📅 *Дата регистрации:* {test_data['registration_date']}
+🏢 *Компания:* {data.full_name}
+📌 *ИНН:* {data.inn or 'Не указан'}
+📌 *ОГРН:* {data.ogrn or 'Не указан'}
+📍 *Адрес:* {data.address or 'Не указан'}
+👤 *Директор:* {data.director_name or 'Не указан'}
+📊 *Статус:* {data.state or 'Не указан'}
+💰 *Уставный капитал:* {data.authorized_capital or 'Не указан'}
+📅 *Дата регистрации:* {data.registration_date or 'Не указана'}
 """
+        else:
+            report = f"""
+❌ *Компания с ИНН {inn} не найдена на Checko.ru*
+
+Проверьте правильность ИНН или попробуйте позже.
+"""
+
         await bot.edit_message_text(
             report,
             chat_id=user_id,
