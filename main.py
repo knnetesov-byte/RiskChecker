@@ -1,5 +1,6 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
+С минимальным веб-сервером для работы на Render.com.
 """
 
 import os
@@ -8,6 +9,7 @@ import logging
 import asyncio
 from typing import Optional
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
@@ -290,10 +292,59 @@ async def handle_inn_message(message: Message):
     check_states[user_id] = {"inn": inn, "started_at": asyncio.get_event_loop().time()}
     asyncio.create_task(run_full_check(user_id, inn))
 
-# ==================== ГЛАВНЫЙ ФАЙЛ ====================
+# ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
+
+async def health_check(request):
+    """Проверка здоровья для Render."""
+    return web.Response(text="I'm alive!", status=200)
+
+async def start_web_server():
+    """Запуск минимального веб-сервера на порту 10000."""
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+    print("✅ Веб-сервер для Render запущен на порту 10000")
+    # Держим сервер запущенным бесконечно
+    await asyncio.Event().wait()
+
+# ==================== ГЛАВНАЯ ФУНКЦИЯ ====================
+
+async def main_async():
+    """Запуск бота и веб-сервера."""
+    # Запускаем веб-сервер в фоне
+    web_task = asyncio.create_task(start_web_server())
+    
+    # Создаём бота и диспетчер
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="Markdown"),
+    )
+    dp = Dispatcher()
+
+    # Регистрируем хендлеры
+    dp.message.register(cmd_start_deep_link, CommandStart(deep_link="check"))
+    dp.message.register(cmd_start, Command("start"))
+    dp.message.register(cmd_help, Command("help"))
+    dp.message.register(cmd_stop, Command("stop"))
+    dp.message.register(handle_inn_message, F.text.regexp(r"\d{10}"))
+    dp.message.register(handle_inn_message, F.text)
+
+    print("🚀 Бот запускается...")
+    try:
+        await dp.start_polling(bot, timeout=60)
+    except TelegramForbiddenError:
+        logger.error(
+            "Бот не имеет прав для отправки сообщений. "
+            "Проверьте токен и настройки бота."
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
 
 def main():
-    """Запуск бота."""
+    """Точка входа."""
     if not BOT_TOKEN:
         logger.error(
             "BOT_TOKEN не установлен! "
@@ -308,32 +359,8 @@ def main():
             "5. Запустите: python main.py\n"
         )
         sys.exit(1)
-
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode="Markdown"),
-    )
-    dp = Dispatcher()
-
-    dp.message.register(cmd_start_deep_link, CommandStart(deep_link="check"))
-    dp.message.register(cmd_start, Command("start"))
-    dp.message.register(cmd_help, Command("help"))
-    dp.message.register(cmd_stop, Command("stop"))
-    dp.message.register(handle_inn_message, F.text.regexp(r"\d{10}"))
-    dp.message.register(handle_inn_message, F.text)
-
-    logger.info("🚀 Бот запускается...")
-    try:
-        dp.run_polling(bot, timeout=60)
-    except TelegramForbiddenError:
-        logger.error(
-            "Бот не имеет прав для отправки сообщений. "
-            "Проверьте токен и настройки бота."
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
-    finally:
-        logger.info("Бот остановлен.")
+    
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
