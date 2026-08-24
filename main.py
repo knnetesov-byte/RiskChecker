@@ -1,26 +1,22 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
-Версия с парсингом Checko.ru.
+Парсинг данных с Checko.ru.
 """
 
 import os
 import sys
 import logging
 import asyncio
-from typing import Optional
+import aiohttp
+from bs4 import BeautifulSoup
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.exceptions import TelegramForbiddenError
 from aiogram.client.default import DefaultBotProperties
 
-# Добавляем корень проекта в путь
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from dotenv import load_dotenv
-from src.modules.rusprofile import RusProfileChecker
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -35,16 +31,71 @@ logger = logging.getLogger(__name__)
 # Конфигурация
 BOT_TOKEN = os.getenv("AI_TOKEN", "")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
-
-# Создаём экземпляр модуля проверки
-rusprofile_checker = RusProfileChecker(
-    timeout=REQUEST_TIMEOUT,
-    max_retries=MAX_RETRIES,
-)
 
 # Хранилище данных для отслеживания процесса проверки
 check_states: dict[int, dict] = {}
+
+# ==================== ПАРСЕР CHECKO.RU ====================
+
+async def get_company_data(inn: str) -> dict:
+    """Получение данных о компании с Checko.ru."""
+    try:
+        url = f"https://checko.ru/inn/{inn}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status != 200:
+                    logger.error(f"Checko.ru вернул статус {response.status} для ИНН {inn}")
+                    return {}
+
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+
+                # Ищем данные
+                data = {}
+
+                # Название компании
+                name_tag = soup.find('h1')
+                if name_tag:
+                    data['full_name'] = name_tag.text.strip()
+
+                # Ищем все строки с данными
+                rows = soup.find_all('div', class_='row')
+                for row in rows:
+                    label = row.find('div', class_='col-sm-4')
+                    value = row.find('div', class_='col-sm-8')
+                    if label and value:
+                        label_text = label.text.strip()
+                        value_text = value.text.strip()
+
+                        if 'ИНН' in label_text:
+                            data['inn'] = value_text
+                        elif 'ОГРН' in label_text:
+                            data['ogrn'] = value_text
+                        elif 'Статус' in label_text:
+                            data['state'] = value_text
+                        elif 'Юридический адрес' in label_text:
+                            data['address'] = value_text
+                        elif 'Руководитель' in label_text:
+                            data['director_name'] = value_text
+                        elif 'Уставный капитал' in label_text:
+                            data['authorized_capital'] = value_text
+                        elif 'Дата регистрации' in label_text:
+                            data['registration_date'] = value_text
+
+                if data:
+                    logger.info(f"Успешно получены данные с Checko.ru для ИНН {inn}")
+                    return data
+                else:
+                    logger.warning(f"Данные для ИНН {inn} не найдены на Checko.ru")
+                    return {}
+
+    except Exception as e:
+        logger.error(f"Ошибка при парсинге Checko.ru для ИНН {inn}: {e}")
+        return {}
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 
@@ -87,23 +138,11 @@ def validate_inn(inn: str) -> tuple[bool, str]:
     """Валидация ИНН (10 цифр)."""
     inn = inn.strip().replace(" ", "").replace("-", "")
     if len(inn) != 10:
-        return False, (
-            f"❌ Неверный формат ИНН.\n\n"
-            f"ИНН должен содержать ровно 10 цифр.\n"
-            f"Ваш ввод: `{inn}`\n\n"
-            f"Попробуйте ещё раз."
-        )
+        return False, f"❌ ИНН должен содержать ровно 10 цифр. Ваш ввод: `{inn}`"
     if not inn.isdigit():
-        return False, (
-            f"❌ ИНН должен содержать только цифры.\n\n"
-            f"Ваш ввод: `{inn}`\n\n"
-            f"Попробуйте ещё раз."
-        )
+        return False, f"❌ ИНН должен содержать только цифры. Ваш ввод: `{inn}`"
     if not _validate_inn_checksum(inn):
-        return False, (
-            f"❌ ИНН не прошёл проверку контрольной суммы.\n\n"
-            f"Проверьте правильность ввода и попробуйте ещё раз."
-        )
+        return False, f"❌ ИНН не прошёл проверку контрольной суммы. Проверьте правильность ввода."
     return True, inn
 
 def _validate_inn_checksum(inn: str) -> bool:
@@ -131,20 +170,20 @@ async def run_full_check(user_id: int, inn: str):
 
     try:
         # Получаем данные с Checko.ru
-        data = await rusprofile_checker.check(inn)
+        data = await get_company_data(inn)
 
-        if data.full_name:
+        if data:
             report = f"""
 📋 *Результат проверки ИНН {inn}*
 
-🏢 *Компания:* {data.full_name}
-📌 *ИНН:* {data.inn or 'Не указан'}
-📌 *ОГРН:* {data.ogrn or 'Не указан'}
-📍 *Адрес:* {data.address or 'Не указан'}
-👤 *Директор:* {data.director_name or 'Не указан'}
-📊 *Статус:* {data.state or 'Не указан'}
-💰 *Уставный капитал:* {data.authorized_capital or 'Не указан'}
-📅 *Дата регистрации:* {data.registration_date or 'Не указана'}
+🏢 *Компания:* {data.get('full_name', 'Не указано')}
+📌 *ИНН:* {data.get('inn', 'Не указан')}
+📌 *ОГРН:* {data.get('ogrn', 'Не указан')}
+📍 *Адрес:* {data.get('address', 'Не указан')}
+👤 *Директор:* {data.get('director_name', 'Не указан')}
+📊 *Статус:* {data.get('state', 'Не указан')}
+💰 *Уставный капитал:* {data.get('authorized_capital', 'Не указан')}
+📅 *Дата регистрации:* {data.get('registration_date', 'Не указана')}
 """
         else:
             report = f"""
@@ -165,8 +204,7 @@ async def run_full_check(user_id: int, inn: str):
     except Exception as e:
         logger.error(f"Ошибка при проверке ИНН {inn}: {e}", exc_info=True)
         await bot.edit_message_text(
-            f"❌ *Ошибка при проверке*\n\n"
-            f"`{str(e)}`",
+            f"❌ *Ошибка при проверке*\n\n`{str(e)}`",
             chat_id=user_id,
             message_id=status_msg.message_id,
             parse_mode="Markdown",
@@ -183,9 +221,7 @@ async def handle_inn_message(message: Message):
     user_id = message.from_user.id
 
     if user_id in check_states:
-        await message.answer(
-            "⏳ Уже идёт проверка. Подождите завершения."
-        )
+        await message.answer("⏳ Уже идёт проверка. Подождите завершения.")
         return
 
     is_valid, result = validate_inn(message.text)
@@ -194,17 +230,15 @@ async def handle_inn_message(message: Message):
         return
 
     inn = result
-    check_states[user_id] = {"inn": inn, "started_at": asyncio.get_event_loop().time()}
+    check_states[user_id] = {"inn": inn}
     asyncio.create_task(run_full_check(user_id, inn))
 
 # ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
 
 async def health_check(request):
-    """Проверка здоровья для Render."""
     return web.Response(text="I'm alive!", status=200)
 
 async def start_web_server():
-    """Запуск минимального веб-сервера на порту 10000."""
     app = web.Application()
     app.router.add_get('/health', health_check)
     runner = web.AppRunner(app)
@@ -217,7 +251,6 @@ async def start_web_server():
 # ==================== ГЛАВНАЯ ФУНКЦИЯ ====================
 
 async def main_async():
-    """Запуск бота и веб-сервера."""
     web_task = asyncio.create_task(start_web_server())
     
     bot = Bot(
@@ -238,11 +271,9 @@ async def main_async():
         logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
 
 def main():
-    """Точка входа."""
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN не установлен!")
         sys.exit(1)
-    
     asyncio.run(main_async())
 
 if __name__ == "__main__":
