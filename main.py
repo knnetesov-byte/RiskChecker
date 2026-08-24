@@ -164,13 +164,20 @@ def validate_inn(inn: str) -> tuple[bool, str]:
     return True, inn
 
 def _validate_inn_checksum(inn: str) -> bool:
-    """Проверка контрольной суммы ИНН (10 цифр)."""
+    """
+    Проверка контрольной суммы ИНН (10 цифр).
+    Правильные коэффициенты для 10-значного ИНН.
+    """
     if len(inn) != 10:
         return False
+    
     digits = [int(d) for d in inn]
-    multipliers = [2, 4, 10, 6, 8, 12, 14, 18, 22]
+    # Правильные коэффициенты для 10-значного ИНН
+    multipliers = [2, 4, 10, 3, 5, 9, 4, 6, 8]
+    
     check_sum = sum(d * m for d, m in zip(digits[:-1], multipliers)) % 11
-    check_digit = check_sum % 10
+    check_digit = check_sum % 10 if check_sum > 9 else check_sum
+    
     return check_digit == digits[-1]
 
 async def run_full_check(user_id: int, inn: str):
