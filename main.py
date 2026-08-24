@@ -1,14 +1,14 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
-Парсинг данных с rusprofile.ru.
+Работа через MCP-сервер atomno-mcp-fns-check.
 """
 
 import os
 import sys
 import logging
 import asyncio
-import aiohttp
-from bs4 import BeautifulSoup
+import subprocess
+import json
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
@@ -18,86 +18,41 @@ from aiogram.client.default import DefaultBotProperties
 
 from dotenv import load_dotenv
 
-# Загружаем переменные окружения
 load_dotenv()
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация
 BOT_TOKEN = os.getenv("AI_TOKEN", "")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
-# Хранилище данных
 check_states: dict[int, dict] = {}
 
-# ==================== ПАРСЕР RUSPROFILE.RU ====================
+# ==================== ПАРСЕР ЧЕРЕЗ MCP-СЕРВЕР ====================
 
 async def get_company_data(inn: str) -> dict:
-    """Получение данных о компании с rusprofile.ru."""
+    """Получение данных через MCP-сервер."""
     try:
-        url = f"https://rusprofile.ru/inn/{inn}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Connection': 'keep-alive',
-        }
-
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as session:
-            await asyncio.sleep(1)
-            async with session.get(url, headers=headers) as response:
-                if response.status != 200:
-                    logger.error(f"rusprofile.ru вернул статус {response.status} для ИНН {inn}")
-                    return {}
-
-                html = await response.text()
-                soup = BeautifulSoup(html, 'html.parser')
-
-                data = {}
-
-                # Название компании
-                name_tag = soup.find('h1')
-                if name_tag:
-                    data['full_name'] = name_tag.text.strip()
-
-                # Ищем таблицу с данными
-                table = soup.find('table', class_='table')
-                if table:
-                    rows = table.find_all('tr')
-                    for row in rows:
-                        cells = row.find_all('td')
-                        if len(cells) >= 2:
-                            key = cells[0].text.strip()
-                            value = cells[1].text.strip()
-                            if 'ИНН' in key:
-                                data['inn'] = value
-                            elif 'ОГРН' in key:
-                                data['ogrn'] = value
-                            elif 'Статус' in key:
-                                data['state'] = value
-                            elif 'Адрес' in key:
-                                data['address'] = value
-                            elif 'Руководитель' in key:
-                                data['director_name'] = value
-                            elif 'Уставный капитал' in key:
-                                data['authorized_capital'] = value
-                            elif 'Дата регистрации' in key:
-                                data['registration_date'] = value
-
-                if data:
-                    logger.info(f"Успешно получены данные с rusprofile.ru для ИНН {inn}")
-                    return data
-                else:
-                    logger.warning(f"Данные для ИНН {inn} не найдены на rusprofile.ru")
-                    return {}
-
+        # Запуск MCP-сервера
+        proc = await asyncio.create_subprocess_exec(
+            "atomno-mcp-fns-check", "check_contractor", inn,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode != 0:
+            logger.error(f"MCP-сервер вернул ошибку: {stderr.decode()}")
+            return {}
+            
+        data = json.loads(stdout.decode())
+        return data
+        
     except Exception as e:
-        logger.error(f"Ошибка при парсинге rusprofile.ru для ИНН {inn}: {e}")
+        logger.error(f"Ошибка при вызове MCP-сервера: {e}")
         return {}
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
@@ -105,15 +60,7 @@ async def get_company_data(inn: str) -> dict:
 async def cmd_start(message: Message):
     await message.answer(
         "👋 Привет! Я — *КонтрагентПро*, бот для проверки юридических лиц.\n\n"
-        "Напишите ИНН компании, и я проверю её по открытым источникам.\n\n"
-        "📋 *Что я покажу:*\n"
-        "• Название компании\n"
-        "• ОГРН\n"
-        "• Адрес\n"
-        "• Руководителя\n"
-        "• Статус\n"
-        "• Уставный капитал\n"
-        "• Дату регистрации\n\n"
+        "Напишите ИНН компании, и я проверю её по государственным реестрам.\n\n"
         "Введите ИНН для проверки (10 цифр):",
         parse_mode="Markdown",
     )
@@ -121,15 +68,7 @@ async def cmd_start(message: Message):
 async def cmd_help(message: Message):
     await message.answer(
         "📖 *СПРАВКА ПО ИСПОЛЬЗОВАНИЮ*\n\n"
-        "*Команды:*\n"
-        "• /start — Запустить бота\n"
-        "• /help — Показать справку\n\n"
-        "*Как проверить компанию:*\n"
-        "1. Напишите ИНН компании (10 цифр)\n"
-        "2. Дождитесь результата (10-20 секунд)\n\n"
-        "*Примеры ИНН:*\n"
-        "• 7707083893 — ООО «Яндекс»\n"
-        "• 7710000001 — ООО «Газпром»\n\n",
+        "Напишите ИНН компании (10 цифр), и я проверю её по открытым источникам.",
         parse_mode="Markdown",
     )
 
@@ -168,26 +107,34 @@ async def run_full_check(user_id: int, inn: str):
 
     try:
         data = await get_company_data(inn)
-
+        
         if data:
+            # Формируем отчёт из данных MCP-сервера
+            name = data.get("card", {}).get("name", {}).get("full", "Не указано")
+            inn_num = data.get("inn", "Не указан")
+            ogrn = data.get("ogrn", "Не указан")
+            address = data.get("card", {}).get("address", {}).get("full", "Не указан")
+            director = data.get("card", {}).get("director", {}).get("full_name", "Не указан")
+            status = data.get("legal_status", {}).get("status_label_ru", "Не указан")
+            risk = data.get("risks", {}).get("overall_risk_level", "не определён")
+            verdict = data.get("verdict_action", "Не определён")
+            reason = data.get("verdict_reason_ru", "Нет данных")
+            
             report = f"""
 📋 *Результат проверки ИНН {inn}*
 
-🏢 *Компания:* {data.get('full_name', 'Не указано')}
-📌 *ИНН:* {data.get('inn', 'Не указан')}
-📌 *ОГРН:* {data.get('ogrn', 'Не указан')}
-📍 *Адрес:* {data.get('address', 'Не указан')}
-👤 *Директор:* {data.get('director_name', 'Не указан')}
-📊 *Статус:* {data.get('state', 'Не указан')}
-💰 *Уставный капитал:* {data.get('authorized_capital', 'Не указан')}
-📅 *Дата регистрации:* {data.get('registration_date', 'Не указана')}
+🏢 *Компания:* {name}
+📌 *ИНН:* {inn_num}
+📌 *ОГРН:* {ogrn}
+📍 *Адрес:* {address}
+👤 *Директор:* {director}
+📊 *Статус:* {status}
+⚠️ *Уровень риска:* {risk}
+💡 *Вердикт:* {verdict}
+📝 *Рекомендации:* {reason}
 """
         else:
-            report = f"""
-❌ *Компания с ИНН {inn} не найдена на rusprofile.ru*
-
-Проверьте правильность ИНН или попробуйте позже.
-"""
+            report = f"❌ *Не удалось получить данные по ИНН {inn}*"
 
         await bot.edit_message_text(
             report,
@@ -274,3 +221,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
