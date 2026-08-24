@@ -142,6 +142,7 @@ async def cmd_stop(message: Message):
 
 def validate_inn(inn: str) -> tuple[bool, str]:
     """Валидация ИНН (10 цифр)."""
+    # Очистка от пробелов, дефисов и других символов
     inn = inn.strip().replace(" ", "").replace("-", "")
     if len(inn) != 10:
         return False, (
@@ -165,19 +166,15 @@ def validate_inn(inn: str) -> tuple[bool, str]:
 
 def _validate_inn_checksum(inn: str) -> bool:
     """
-    Проверка контрольной суммы ИНН (10 цифр).
-    Правильные коэффициенты для 10-значного ИНН.
+    Проверка контрольной суммы 10-значного ИНН.
     """
     if len(inn) != 10:
         return False
-    
     digits = [int(d) for d in inn]
-    # Правильные коэффициенты для 10-значного ИНН
-    multipliers = [2, 4, 10, 3, 5, 9, 4, 6, 8]
-    
-    check_sum = sum(d * m for d, m in zip(digits[:-1], multipliers)) % 11
-    check_digit = check_sum % 10 if check_sum > 9 else check_sum
-    
+    # Коэффициенты для 10-значного ИНН: 2, 4, 10, 3, 5, 9, 4, 6, 8
+    coeffs = [2, 4, 10, 3, 5, 9, 4, 6, 8]
+    total = sum(d * c for d, c in zip(digits[:-1], coeffs))
+    check_digit = (total % 11) % 10
     return check_digit == digits[-1]
 
 async def run_full_check(user_id: int, inn: str):
