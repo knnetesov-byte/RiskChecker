@@ -1,4 +1,3 @@
-"""
 import os
 import logging
 import aiohttp
@@ -24,7 +23,6 @@ class RusProfileData:
 
 class RusProfileChecker:
     """Проверка данных о компании через Checko.ru."""
-
     def __init__(self, timeout: int = 30, max_retries: int = 3):
         self.timeout = timeout
         self.max_retries = max_retries
@@ -50,58 +48,49 @@ class RusProfileChecker:
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
 
-                    # Извлекаем данные
                     data = {}
 
-                    # Название компании
                     name_block = soup.find('h1', itemprop='name')
                     if name_block:
                         data['full_name'] = name_block.text.strip()
                         data['short_name'] = name_block.text.strip()
 
-                    # ИНН
                     inn_block = soup.find('td', string='ИНН')
                     if inn_block:
                         next_td = inn_block.find_next('td')
                         if next_td:
                             data['inn'] = next_td.text.strip()
 
-                    # ОГРН
                     ogrn_block = soup.find('td', string='ОГРН')
                     if ogrn_block:
                         next_td = ogrn_block.find_next('td')
                         if next_td:
                             data['ogrn'] = next_td.text.strip()
 
-                    # Статус
                     status_block = soup.find('td', string='Статус')
                     if status_block:
                         next_td = status_block.find_next('td')
                         if next_td:
                             data['state'] = next_td.text.strip()
 
-                    # Адрес
                     address_block = soup.find('td', string='Юридический адрес')
                     if address_block:
                         next_td = address_block.find_next('td')
                         if next_td:
                             data['address'] = next_td.text.strip()
 
-                    # Директор
                     director_block = soup.find('td', string='Руководитель')
                     if director_block:
                         next_td = director_block.find_next('td')
                         if next_td:
                             data['director_name'] = next_td.text.strip()
 
-                    # Уставный капитал
                     capital_block = soup.find('td', string='Уставный капитал')
                     if capital_block:
                         next_td = capital_block.find_next('td')
                         if next_td:
                             data['authorized_capital'] = next_td.text.strip()
 
-                    # Дата регистрации
                     reg_date_block = soup.find('td', string='Дата регистрации')
                     if reg_date_block:
                         next_td = reg_date_block.find_next('td')
@@ -114,4 +103,3 @@ class RusProfileChecker:
         except Exception as e:
             logger.error(f"Ошибка при парсинге Checko.ru для ИНН {inn}: {e}")
             return RusProfileData({})
-        }
