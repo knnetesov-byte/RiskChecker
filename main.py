@@ -1,6 +1,6 @@
 """
 Telegram-бот для проверки юридических лиц по ИНН.
-Парсинг данных с Checko.ru.
+Парсинг данных с Checko.ru с имитацией браузера.
 """
 
 import os
@@ -41,26 +41,50 @@ async def get_company_data(inn: str) -> dict:
     """Получение данных о компании с Checko.ru."""
     try:
         url = f"https://checko.ru/inn/{inn}"
+        
+        # Максимально реалистичные заголовки браузера
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
         }
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as session:
+            # Имитация задержки, как будто человек открывает страницу
+            await asyncio.sleep(2)
+            
             async with session.get(url, headers=headers) as response:
                 if response.status != 200:
                     logger.error(f"Checko.ru вернул статус {response.status} для ИНН {inn}")
                     return {}
 
                 html = await response.text()
+                
+                # Сохраняем HTML для отладки
+                logger.info(f"Получен HTML для ИНН {inn}, длина: {len(html)} символов")
+                
                 soup = BeautifulSoup(html, 'html.parser')
 
                 # Ищем данные
                 data = {}
 
-                # Название компании
+                # Название компании — ищем по разным тегам
                 name_tag = soup.find('h1')
                 if name_tag:
                     data['full_name'] = name_tag.text.strip()
+                else:
+                    # Альтернативный поиск
+                    name_tag = soup.find('div', class_='company-name')
+                    if name_tag:
+                        data['full_name'] = name_tag.text.strip()
 
                 # Ищем все строки с данными
                 rows = soup.find_all('div', class_='row')
