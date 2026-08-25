@@ -45,13 +45,8 @@ def run_mcp_check(inn: str) -> dict:
         if result.returncode != 0:
             logger.error(f"Ошибка MCP: {result.stderr}")
             return {}
-        
-        # Парсим JSON из stdout
         data = json.loads(result.stdout)
         return data
-    except json.JSONDecodeError as e:
-        logger.error(f"Ошибка парсинга JSON: {e}")
-        return {}
     except Exception as e:
         logger.error(f"Ошибка при вызове MCP: {e}")
         return {}
@@ -189,7 +184,7 @@ async def start_web_server():
 
 async def main_async():
     web_task = asyncio.create_task(start_web_server())
-    
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="Markdown"),
@@ -214,3 +209,4 @@ def main():
     asyncio.run(main_async())
 
 if __name__ == "__main__":
+    main()
