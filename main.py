@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 
 # Импортируем проверку из установленной библиотеки
-from atomno_mcp_fns_check import check_contractor
+from atomno_mcp_fns_check import check_contractor_tool
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -167,7 +167,7 @@ async def run_full_check(user_id: int, inn: str):
 
     try:
         # Используем функцию из библиотеки напрямую
-        result = check_contractor(identifier=inn)
+        result = check_contractor_tool(identifier=inn)
         
         if result and result.get('inn'):
             report = format_report(inn, result)
